@@ -63,7 +63,7 @@ def get_ai_analysis(data_for_ai, api_key):
         model_name = 'gemini-2.5-flash' 
 
         prompt = f"""
-        Bạn là một chuyên gia phân tích tài chính chuyên nghiệp. Dựa trên các chỉ số tài chính sau, hãy đưa ra một nhận xét khách quan, ngắn gọn (khoảng 3-4 đoạn) về tình hình tài chính của doanh nghiệp. Đánh giá tập trung vào tốc độ tăng trưởng, thay đổi cơ cấu tài sản và khả năng thanh toán hiện hành.
+        Bạn là một chuyên gia phân tích tài chính chuyên nghiệp. Dựa trên các chỉ số tài chính sau, hãy đưa ra một nhận xét khách quan, ngắn gọn (khoảng 3-4 đoạn) về tình hình tài chính của doanh nghiệp. Đánh giá tập trung vào tốc độ tăng trưởng, khả năng thanh toán, **hiệu quả sử dụng tài sản**, và **khả năng sinh lời**.
         
         Dữ liệu thô và chỉ số:
         {data_for_ai}
@@ -92,6 +92,13 @@ uploaded_file = st.file_uploader(
 # Khởi tạo giá trị mặc định cho chỉ số thanh toán
 thanh_toan_hien_hanh_N = "N/A"
 thanh_toan_hien_hanh_N_1 = "N/A"
+
+# Khởi tạo giá trị mặc định cho các chỉ số mới (Hiệu quả & Lợi nhuận)
+tat_N = "N/A" # Vòng quay Tổng tài sản Năm sau (chỉ tính cho năm N)
+npm_N = "N/A" # Biên lợi nhuận ròng Năm sau
+npm_N_1 = "N/A" # Biên lợi nhuận ròng Năm trước
+roa_N = "N/A" # Tỷ suất sinh lời trên Tổng tài sản Năm sau (chỉ tính cho năm N)
+
 
 if uploaded_file is not None:
     try:
@@ -123,6 +130,8 @@ if uploaded_file is not None:
             st.subheader("4. Các Chỉ số Tài chính Cơ bản")
             
             try:
+                # --- I. Chỉ số Thanh toán Hiện hành (Existing) ---
+                
                 # Lấy Tài sản ngắn hạn
                 tsnh_n = df_processed[df_processed['Chỉ tiêu'].str.contains('TÀI SẢN NGẮN HẠN', case=False, na=False)]['Năm sau'].iloc[0]
                 tsnh_n_1 = df_processed[df_processed['Chỉ tiêu'].str.contains('TÀI SẢN NGẮN HẠN', case=False, na=False)]['Năm trước'].iloc[0]
@@ -134,45 +143,123 @@ if uploaded_file is not None:
                 # Tính toán, tránh chia cho 0
                 thanh_toan_hien_hanh_N = tsnh_n / no_ngan_han_N if no_ngan_han_N != 0 else float('inf')
                 thanh_toan_hien_hanh_N_1 = tsnh_n_1 / no_ngan_han_N_1 if no_ngan_han_N_1 != 0 else float('inf')
+
+                # --- II. Lấy các chỉ tiêu cần thiết cho Hiệu suất và Lợi nhuận (MỚI) ---
                 
-                col1, col2 = st.columns(2)
-                with col1:
+                # Tổng Tài sản
+                ts_N = df_processed[df_processed['Chỉ tiêu'].str.contains('TỔNG CỘNG TÀI SẢN', case=False, na=False)]['Năm sau'].iloc[0]
+                ts_N_1 = df_processed[df_processed['Chỉ tiêu'].str.contains('TỔNG CỘNG TÀI SẢN', case=False, na=False)]['Năm trước'].iloc[0]
+                
+                # Doanh thu thuần (Giả định có chỉ tiêu này)
+                dt_N = df_processed[df_processed['Chỉ tiêu'].str.contains('DOANH THU THUẦN', case=False, na=False)]['Năm sau'].iloc[0]
+                dt_N_1 = df_processed[df_processed['Chỉ tiêu'].str.contains('DOANH THU THUẦN', case=False, na=False)]['Năm trước'].iloc[0]
+
+                # Lợi nhuận sau thuế (Giả định có chỉ tiêu này)
+                lnst_N = df_processed[df_processed['Chỉ tiêu'].str.contains('LỢI NHUẬN SAU THUẾ', case=False, na=False)]['Năm sau'].iloc[0]
+                lnst_N_1 = df_processed[df_processed['Chỉ tiêu'].str.contains('LỢI NHUẬN SAU THUẾ', case=False, na=False)]['Năm trước'].iloc[0]
+                
+                # Tổng Tài sản bình quân (TSBQ) - Chỉ dùng cho năm hiện tại (N)
+                tsbq_N = (ts_N + ts_N_1) / 2 if ts_N is not None and ts_N_1 is not None else 0
+                
+                # --- III. Tính Chỉ số Hiệu quả sử dụng Tài sản (MỚI) ---
+                # 1. Vòng quay Tổng tài sản (TAT) = DT thuần / Tổng tài sản bình quân
+                if tsbq_N != 0 and dt_N is not None:
+                    tat_N = dt_N / tsbq_N
+                    
+                # --- IV. Tính Chỉ tiêu Lợi nhuận (MỚI) ---
+                # 2. Biên lợi nhuận ròng (NPM) = LNST / DT thuần
+                if dt_N != 0 and lnst_N is not None:
+                    npm_N = (lnst_N / dt_N) * 100
+                if dt_N_1 != 0 and lnst_N_1 is not None:
+                    npm_N_1 = (lnst_N_1 / dt_N_1) * 100
+                    
+                # 3. Tỷ suất sinh lời trên Tổng tài sản (ROA) = LNST / Tổng tài sản bình quân
+                if tsbq_N != 0 and lnst_N is not None:
+                    roa_N = (lnst_N / tsbq_N) * 100
+
+                # --- Hiển thị kết quả (Sử dụng 3 cột mới) ---
+                col_thanh_toan, col_hieu_suat, col_loi_nhuan = st.columns(3)
+
+                # Col 1: Khả năng Thanh toán
+                with col_thanh_toan:
+                    st.markdown("##### 1. Khả năng Thanh toán")
                     st.metric(
-                        label="Chỉ số Thanh toán Hiện hành (Năm trước)",
+                        label="Thanh toán Hiện hành (N-1)",
                         value=f"{thanh_toan_hien_hanh_N_1:.2f} lần" if thanh_toan_hien_hanh_N_1 != float('inf') else "Vô hạn"
                     )
-                with col2:
                     st.metric(
-                        label="Chỉ số Thanh toán Hiện hành (Năm sau)",
+                        label="Thanh toán Hiện hành (N)",
                         value=f"{thanh_toan_hien_hanh_N:.2f} lần" if thanh_toan_hien_hanh_N != float('inf') else "Vô hạn",
                         delta=f"{thanh_toan_hien_hanh_N - thanh_toan_hien_hanh_N_1:.2f}" if (thanh_toan_hien_hanh_N != float('inf') and thanh_toan_hien_hanh_N_1 != float('inf')) else None
                     )
                     
+                # Col 2: Hiệu quả sử dụng Tài sản (MỚI)
+                with col_hieu_suat:
+                    st.markdown("##### 2. Hiệu quả sử dụng Tài sản")
+                    if tat_N != "N/A":
+                        st.metric(
+                            label="Vòng quay Tổng tài sản (TAT) (N)",
+                            value=f"{tat_N:.2f} lần"
+                        )
+                    else:
+                        st.metric(label="Vòng quay Tổng tài sản (TAT) (N)", value="Thiếu DT/TSBQ")
+                        
+                # Col 3: Chỉ tiêu Lợi nhuận (MỚI)
+                with col_loi_nhuan:
+                    st.markdown("##### 3. Chỉ tiêu Lợi nhuận")
+                    # NPM N
+                    if npm_N != "N/A" and npm_N_1 != "N/A":
+                        delta_npm = npm_N - npm_N_1
+                        st.metric(
+                            label="Biên lợi nhuận ròng (NPM) (N)",
+                            value=f"{npm_N:.2f}%",
+                            delta=f"{delta_npm:.2f}"
+                        )
+                    else:
+                        st.metric(label="Biên lợi nhuận ròng (NPM) (N)", value="Thiếu LNST/DT")
+                        
+                    # ROA N
+                    if roa_N != "N/A":
+                        st.metric(
+                            label="Tỷ suất sinh lời trên Tổng tài sản (ROA) (N)",
+                            value=f"{roa_N:.2f}%"
+                        )
+                    else:
+                        st.metric(label="Tỷ suất sinh lời trên Tổng tài sản (ROA) (N)", value="Thiếu LNST/TSBQ")
+                
             except IndexError:
-                st.warning("Thiếu chỉ tiêu 'TÀI SẢN NGẮN HẠN' hoặc 'NỢ NGẮN HẠN' để tính chỉ số.")
-                thanh_toan_hien_hanh_N = "N/A" 
-                thanh_toan_hien_hanh_N_1 = "N/A"
+                st.warning("Thiếu một trong các chỉ tiêu: 'TÀI SẢN NGẮN HẠN', 'NỢ NGẮN HẠN', 'DOANH THU THUẦN', 'LỢI NHUẬN SAU THUẾ' hoặc 'TỔNG CỘNG TÀI SẢN' để tính chỉ số.")
+                # Đảm bảo các biến vẫn là "N/A"
+                pass
             except ZeroDivisionError:
-                st.warning("Lỗi chia cho 0 khi tính chỉ số thanh toán. Nợ ngắn hạn bằng 0.")
-                thanh_toan_hien_hanh_N = "N/A" 
-                thanh_toan_hien_hanh_N_1 = "N/A"
+                st.warning("Lỗi chia cho 0 khi tính chỉ số. Vui lòng kiểm tra Nợ ngắn hạn, Doanh thu thuần hoặc Tổng tài sản bình quân.")
+                # Đảm bảo các biến vẫn là "N/A"
+                pass
             
             # --- Chức năng 5: Nhận xét AI (Tự động) ---
             st.subheader("5. Nhận xét Tình hình Tài chính (AI Tự động)")
             
-            # Chuẩn bị dữ liệu để gửi cho AI
+            # Chuẩn bị dữ liệu để gửi cho AI (ĐÃ CẬP NHẬT)
             data_for_ai = pd.DataFrame({
                 'Chỉ tiêu': [
                     'Toàn bộ Bảng phân tích (dữ liệu thô)', 
                     'Tăng trưởng Tài sản ngắn hạn (%)', 
                     'Thanh toán hiện hành (N-1)', 
-                    'Thanh toán hiện hành (N)'
+                    'Thanh toán hiện hành (N)',
+                    'Vòng quay Tổng tài sản (TAT) (N)',
+                    'Biên lợi nhuận ròng (NPM) (N-1)',
+                    'Biên lợi nhuận ròng (NPM) (N)',
+                    'Tỷ suất sinh lời trên TS (ROA) (N)'
                 ],
                 'Giá trị': [
                     st.session_state['df_processed_markdown'], # Lấy dữ liệu từ session state
                     f"{df_processed[df_processed['Chỉ tiêu'].str.contains('TÀI SẢN NGẮN HẠN', case=False, na=False)]['Tốc độ tăng trưởng (%)'].iloc[0]:.2f}%" if not isinstance(thanh_toan_hien_hanh_N, str) else "N/A", 
                     f"{thanh_toan_hien_hanh_N_1:.2f}" if not isinstance(thanh_toan_hien_hanh_N_1, str) else "N/A", 
-                    f"{thanh_toan_hien_hanh_N:.2f}" if not isinstance(thanh_toan_hien_hanh_N, str) else "N/A"
+                    f"{thanh_toan_hien_hanh_N:.2f}" if not isinstance(thanh_toan_hien_hanh_N, str) else "N/A",
+                    f"{tat_N:.2f}" if not isinstance(tat_N, str) else "N/A",
+                    f"{npm_N_1:.2f}%" if not isinstance(npm_N_1, str) else "N/A",
+                    f"{npm_N:.2f}%" if not isinstance(npm_N, str) else "N/A",
+                    f"{roa_N:.2f}%" if not isinstance(roa_N, str) else "N/A"
                 ]
             }).to_markdown(index=False) 
 
